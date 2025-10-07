@@ -178,6 +178,11 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
     val lightReminderEnabled by prefs.lightReminderEnabled.collectAsState(initial = true)
     val persistedSteps by prefs.totalSteps.collectAsState(initial = 0)
 
+    val speed by counter.speedMps.collectAsState()
+    val activityState by counter.activityState.collectAsState()
+    val calories by counter.caloriesBurned.collectAsState()
+    val distance by counter.distanceMeters.collectAsState()
+
     val ambientLux by counter.ambientLux.collectAsState()
     val isCovered by counter.isCovered.collectAsState()
     var stepsToday by remember { mutableIntStateOf(persistedSteps) }
@@ -263,6 +268,16 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
             text = "Goal: $dailyGoal",
             style = MaterialTheme.typography.bodyLarge
         )
+        Spacer(Modifier.height(16.dp))
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = "Activity State: $activityState", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(text = String.format("Speed: %.2f m/s", speed), style = MaterialTheme.typography.bodyMedium)
+            Text(text = String.format("Calories: %.1f kcal", calories), style = MaterialTheme.typography.bodyMedium)
+            Text(text = String.format("Distance: %.2f m", distance), style = MaterialTheme.typography.bodyMedium)
+        }
+
         Spacer(Modifier.height(24.dp))
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
