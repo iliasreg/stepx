@@ -7,118 +7,116 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
-import java.time.LocalDate
-import kotlin.math.sqrt
+import kotlinx.coroutines.*
 
-class StepTrackingService : Service(), SensorEventListener {
-	private lateinit var sensorManager: SensorManager
-	private var proximitySensor: Sensor? = null
-    private var accelSensor: Sensor? = null
-	private var isCovered: Boolean = false
-
-    private var gravityX: Float = 0f
-    private var gravityY: Float = 0f
-    private var gravityZ: Float = 0f
-    private var lastStepAtMs: Long = 0L
-
-	private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
-	private lateinit var prefs: PreferencesManager
+class StepTrackingService : Service() {
+	private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+	private lateinit var counter: StepCounterManager
 
 	override fun onCreate() {
 		super.onCreate()
-		prefs = PreferencesManager(this)
-		sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-        accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
 		createNotificationChannel()
-		startInForeground()
-		registerSensors()
+		startForegroundServiceNotification()
+		counter = StepCounterManager.getInstance(applicationContext)
+
+		serviceScope.launch {
+			counter.totalSteps.collect { steps ->
+				updateNotification("Steps: $steps")
+			}
+		}
 	}
 
 	override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+		counter // initialization triggers sensor registration
 		return START_STICKY
 	}
 
 	override fun onDestroy() {
 		super.onDestroy()
-		sensorManager.unregisterListener(this)
+		serviceScope.cancel()
 	}
 
 	override fun onBind(intent: Intent?): IBinder? = null
 
-	private fun registerSensors() {
-		proximitySensor?.let {
-			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-		}
-        accelSensor?.let {
-			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-		}
-	}
-
-	override fun onSensorChanged(event: android.hardware.SensorEvent) {
-		when (event.sensor.type) {
-			Sensor.TYPE_PROXIMITY -> {
-				val max = proximitySensor?.maximumRange ?: 0f
-				isCovered = (event.values.firstOrNull() ?: max) < max
-            }
-            Sensor.TYPE_ACCELEROMETER -> {
-                val alpha = 0.8f
-                val ax = event.values[0]
-                val ay = event.values[1]
-                val az = event.values[2]
-
-                gravityX = alpha * gravityX + (1 - alpha) * ax
-                gravityY = alpha * gravityY + (1 - alpha) * ay
-                gravityZ = alpha * gravityZ + (1 - alpha) * az
-
-                val linearX = ax - gravityX
-                val linearY = ay - gravityY
-                val linearZ = az - gravityZ
-
-                val magnitude = sqrt((linearX * linearX + linearY * linearY + linearZ * linearZ).toDouble()).toFloat()
-                val now = System.currentTimeMillis()
-                val debounceMs = 300L
-                val threshold = 1.2f
-                if (!isCovered && magnitude > threshold && (now - lastStepAtMs) > debounceMs) {
-                    lastStepAtMs = now
-                    serviceScope.launch { prefs.incrementTotalSteps(1) }
-                }
-            }
-		}
-	}
-
-	override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) {}
-
-    private fun startInForeground() {
-		val intent = Intent(this, MainActivity::class.java)
-		val pi = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-			.setContentTitle("StepX Tracking")
-			.setContentText("Counting your steps in the background")
-            .setSmallIcon(android.R.drawable.ic_notification_overlay)
-			.setContentIntent(pi)
-			.setOngoing(true)
-			.build()
-		startForeground(NOTIFICATION_ID, notification)
-	}
-
 	private fun createNotificationChannel() {
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-			val channel = NotificationChannel(CHANNEL_ID, "Step Tracking", NotificationManager.IMPORTANCE_LOW)
+			val channel = NotificationChannel(
+				CHANNEL_ID,
+				"Step Tracking",
+				NotificationManager.IMPORTANCE_LOW
+			)
 			NotificationManagerCompat.from(this).createNotificationChannel(channel)
 		}
+	}
+
+	private fun startForegroundServiceNotification() {
+		try {
+			// Ensure the channel exists before building notification
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+				val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+				if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
+					val ch = NotificationChannel(
+						CHANNEL_ID,
+						"Step Tracking",
+						NotificationManager.IMPORTANCE_LOW
+					)
+					mgr.createNotificationChannel(ch)
+				}
+			}
+
+			// Ask for notification permission on Android 13+
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+				val granted = checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+						PackageManager.PERMISSION_GRANTED
+				if (!granted) {
+					// Create a temporary minimal notification (safe fallback)
+					val temp = NotificationCompat.Builder(this, CHANNEL_ID)
+						.setContentTitle("StepX starting…")
+						.setSmallIcon(android.R.drawable.ic_dialog_info)
+						.build()
+					startForeground(NOTIFICATION_ID, temp)
+					return
+				}
+			}
+
+			val intent = Intent(this, MainActivity::class.java)
+			val pi = PendingIntent.getActivity(
+				this, 0, intent,
+				PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+			)
+
+			val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+				.setContentTitle("StepX Active")
+				.setContentText("Tracking your steps in the background")
+				.setSmallIcon(android.R.drawable.ic_dialog_info)
+				.setOngoing(true)
+				.setContentIntent(pi)
+				.build()
+
+			startForeground(NOTIFICATION_ID, notification)
+
+		} catch (e: Exception) {
+			// Fallback — don’t crash, just log and stop service gracefully
+			android.util.Log.e("StepX", "startForegroundServiceNotification failed", e)
+			stopSelf()
+		}
+	}
+
+
+	private fun updateNotification(text: String) {
+		val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+		val updated = NotificationCompat.Builder(this, CHANNEL_ID)
+			.setContentTitle("StepX Active")
+			.setContentText(text)
+			.setSmallIcon(android.R.drawable.ic_dialog_info)
+			.setOngoing(true)
+			.build()
+		manager.notify(NOTIFICATION_ID, updated)
 	}
 
 	companion object {
