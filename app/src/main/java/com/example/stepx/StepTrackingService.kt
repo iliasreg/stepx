@@ -25,13 +25,13 @@ import kotlin.math.sqrt
 class StepTrackingService : Service(), SensorEventListener {
 	private lateinit var sensorManager: SensorManager
 	private var proximitySensor: Sensor? = null
-	private var accelSensor: Sensor? = null
+    private var accelSensor: Sensor? = null
 	private var isCovered: Boolean = false
 
-	private var gravityX: Float = 0f
-	private var gravityY: Float = 0f
-	private var gravityZ: Float = 0f
-	private var lastStepAtMs: Long = 0L
+    private var gravityX: Float = 0f
+    private var gravityY: Float = 0f
+    private var gravityZ: Float = 0f
+    private var lastStepAtMs: Long = 0L
 
 	private val serviceScope = CoroutineScope(Dispatchers.Default + Job())
 	private lateinit var prefs: PreferencesManager
@@ -40,8 +40,8 @@ class StepTrackingService : Service(), SensorEventListener {
 		super.onCreate()
 		prefs = PreferencesManager(this)
 		sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-		proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-		accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+        accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
 		createNotificationChannel()
 		startInForeground()
 		registerSensors()
@@ -62,7 +62,7 @@ class StepTrackingService : Service(), SensorEventListener {
 		proximitySensor?.let {
 			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
 		}
-		accelSensor?.let {
+        accelSensor?.let {
 			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
 		}
 	}
@@ -72,32 +72,30 @@ class StepTrackingService : Service(), SensorEventListener {
 			Sensor.TYPE_PROXIMITY -> {
 				val max = proximitySensor?.maximumRange ?: 0f
 				isCovered = (event.values.firstOrNull() ?: max) < max
-			}
-			Sensor.TYPE_ACCELEROMETER -> {
-				val alpha = 0.8f
-				val ax = event.values[0]
-				val ay = event.values[1]
-				val az = event.values[2]
+            }
+            Sensor.TYPE_ACCELEROMETER -> {
+                val alpha = 0.8f
+                val ax = event.values[0]
+                val ay = event.values[1]
+                val az = event.values[2]
 
-				gravityX = alpha * gravityX + (1 - alpha) * ax
-				gravityY = alpha * gravityY + (1 - alpha) * ay
-				gravityZ = alpha * gravityZ + (1 - alpha) * az
+                gravityX = alpha * gravityX + (1 - alpha) * ax
+                gravityY = alpha * gravityY + (1 - alpha) * ay
+                gravityZ = alpha * gravityZ + (1 - alpha) * az
 
-				val linearX = ax - gravityX
-				val linearY = ay - gravityY
-				val linearZ = az - gravityZ
+                val linearX = ax - gravityX
+                val linearY = ay - gravityY
+                val linearZ = az - gravityZ
 
-				val magnitude = sqrt((linearX * linearX + linearY * linearY + linearZ * linearZ).toDouble()).toFloat()
-				val now = System.currentTimeMillis()
-				val debounceMs = 300L
-				val threshold = 1.2f
-				if (!isCovered && magnitude > threshold && (now - lastStepAtMs) > debounceMs) {
-					lastStepAtMs = now
-					serviceScope.launch {
-						prefs.incrementStepsForDate(LocalDate.now(), 1)
-					}
-				}
-			}
+                val magnitude = sqrt((linearX * linearX + linearY * linearY + linearZ * linearZ).toDouble()).toFloat()
+                val now = System.currentTimeMillis()
+                val debounceMs = 300L
+                val threshold = 1.2f
+                if (!isCovered && magnitude > threshold && (now - lastStepAtMs) > debounceMs) {
+                    lastStepAtMs = now
+                    serviceScope.launch { prefs.incrementTotalSteps(1) }
+                }
+            }
 		}
 	}
 

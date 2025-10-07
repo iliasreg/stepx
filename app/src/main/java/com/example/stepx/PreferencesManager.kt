@@ -22,6 +22,7 @@ class PreferencesManager(private val context: Context) {
         val POCKET_DETECTION_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("pocket_detection_enabled")
         val DARK_THEME_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("dark_theme_enabled")
         val BACKGROUND_TRACKING_ENABLED: Preferences.Key<Boolean> = booleanPreferencesKey("background_tracking_enabled")
+        val TOTAL_STEPS: Preferences.Key<Int> = intPreferencesKey("total_steps")
     }
 
     val dailyGoal: Flow<Int> = context.dataStore.data.map { prefs ->
@@ -42,6 +43,11 @@ class PreferencesManager(private val context: Context) {
 
     val backgroundTrackingEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.BACKGROUND_TRACKING_ENABLED] ?: false
+    }
+
+    // Total steps (not tied to date)
+    val totalSteps: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.TOTAL_STEPS] ?: 0
     }
 
     suspend fun setDailyGoal(goal: Int) {
@@ -71,6 +77,20 @@ class PreferencesManager(private val context: Context) {
     suspend fun setBackgroundTrackingEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[Keys.BACKGROUND_TRACKING_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setTotalSteps(steps: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[Keys.TOTAL_STEPS] = steps.coerceAtLeast(0)
+        }
+    }
+
+    suspend fun incrementTotalSteps(delta: Int = 1) {
+        if (delta == 0) return
+        context.dataStore.edit { prefs ->
+            val current = prefs[Keys.TOTAL_STEPS] ?: 0
+            prefs[Keys.TOTAL_STEPS] = (current + delta).coerceAtLeast(0)
         }
     }
 

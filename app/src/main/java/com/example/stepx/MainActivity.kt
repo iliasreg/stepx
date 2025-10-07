@@ -7,7 +7,10 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,7 +36,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneIphone
@@ -98,12 +100,17 @@ class MainActivity : ComponentActivity() {
             val darkTheme by prefs.darkThemeEnabled.collectAsState(initial = false)
             StepXTheme(darkTheme = darkTheme) {
                 val navController = rememberNavController()
-                val snackbarHostState = remember { SnackbarHostState() }
-                val needsNotifPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            val snackbarHostState = remember { SnackbarHostState() }
+            val needsNotifPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            val needsARPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
                 val notifPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission(),
                     onResult = { }
                 )
+            val arPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission(),
+                onResult = { }
+            )
                 if (needsNotifPermission) {
                     LaunchedEffect(Unit) {
                         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
@@ -115,6 +122,17 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            if (needsARPermission) {
+                LaunchedEffect(Unit) {
+                    val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                        this@MainActivity,
+                        Manifest.permission.ACTIVITY_RECOGNITION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (!granted) {
+                        arPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                    }
+                }
+            }
                 Scaffold(modifier = Modifier.fillMaxSize(), snackbarHost = { SnackbarHost(snackbarHostState) }, bottomBar = {
                     val route = navController.currentBackStackEntryAsState().value?.destination?.route
                     NavigationBar {
@@ -124,12 +142,7 @@ class MainActivity : ComponentActivity() {
                             icon = { Icon(Icons.Default.Home, contentDescription = "Dashboard") },
                             label = { Text("Dashboard") }
                         )
-                        NavigationBarItem(
-                            selected = route == "history",
-                            onClick = { navController.navigate("history") },
-                            icon = { Icon(Icons.Default.BarChart, contentDescription = "History") },
-                            label = { Text("History") }
-                        )
+                        
                         NavigationBarItem(
                             selected = route == "settings",
                             onClick = { navController.navigate("settings") },
@@ -146,7 +159,7 @@ class MainActivity : ComponentActivity() {
                         composable("dashboard") {
                             DashboardScreen(snackbarHostState = snackbarHostState)
                         }
-                        composable("history") { HistoryScreen() }
+                        
                         composable("settings") { SettingsScreen() }
                     }
                 }
@@ -159,98 +172,26 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
     val context = LocalContext.current
-    val sensorManager = remember {
-        context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    }
+    val counter = remember { StepCounterManager.getInstance(context) }
     val prefs = remember { PreferencesManager(context) }
     val dailyGoal by prefs.dailyGoal.collectAsState(initial = 10000)
-    val pocketToggle by prefs.pocketDetectionEnabled.collectAsState(initial = true)
     val lightReminderEnabled by prefs.lightReminderEnabled.collectAsState(initial = true)
-    val scope = rememberCoroutineScope()
-    var today by remember { mutableStateOf(LocalDate.now()) }
-    val persistedSteps by prefs.stepsForDate(today).collectAsState(initial = 0)
+    val persistedSteps by prefs.totalSteps.collectAsState(initial = 0)
 
-    var ambientLux by remember { mutableFloatStateOf(0f) }
-    var isCovered by remember { mutableStateOf(false) }
+    val ambientLux by counter.ambientLux.collectAsState()
+    val isCovered by counter.isCovered.collectAsState()
     var stepsToday by remember { mutableIntStateOf(persistedSteps) }
-    var gravityX by remember { mutableFloatStateOf(0f) }
-    var gravityY by remember { mutableFloatStateOf(0f) }
-    var gravityZ by remember { mutableFloatStateOf(0f) }
-    var lastStepAtMs by remember { mutableLongStateOf(0L) }
     var firstDimAtMs by remember { mutableLongStateOf(0L) }
 
-    DisposableEffect(Unit) {
-        val lightSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
-        val proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-        val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-
-        val listener = object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent) {
-                when (event.sensor.type) {
-                    Sensor.TYPE_LIGHT -> ambientLux = event.values.firstOrNull() ?: 0f
-                    Sensor.TYPE_PROXIMITY -> isCovered = if (pocketToggle) {
-                        event.values.firstOrNull()?.let { it < (proximitySensor?.maximumRange ?: 0f) } == true
-                    } else false
-                    Sensor.TYPE_ACCELEROMETER -> {
-                        // Simple low-pass to estimate gravity
-                        val alpha = 0.8f
-                        val ax = event.values[0]
-                        val ay = event.values[1]
-                        val az = event.values[2]
-
-                        gravityX = alpha * gravityX + (1 - alpha) * ax
-                        gravityY = alpha * gravityY + (1 - alpha) * ay
-                        gravityZ = alpha * gravityZ + (1 - alpha) * az
-
-                        val linearX = ax - gravityX
-                        val linearY = ay - gravityY
-                        val linearZ = az - gravityZ
-
-                        val magnitude = sqrt(
-                            (linearX * linearX + linearY * linearY + linearZ * linearZ)
-                                .toDouble()
-                        ).toFloat()
-
-                        // Peak detection with threshold and debounce
-                        val now = System.currentTimeMillis()
-                        val debounceMs = 300L
-                        val threshold = 1.2f // tuned for typical walking motion
-
-                        if (!isCovered && magnitude > threshold && (now - lastStepAtMs) > debounceMs) {
-                            stepsToday += 1
-                            lastStepAtMs = now
-                            scope.launch { prefs.incrementStepsForDate(today, 1) }
-                        }
-                    }
-                }
-            }
-
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-        }
-
-        lightSensor?.let {
-            sensorManager.registerListener(
-                listener,
-                it,
-                SensorManager.SENSOR_DELAY_UI
-            )
-        }
-        proximitySensor?.let {
-            sensorManager.registerListener(
-                listener,
-                it,
-                SensorManager.SENSOR_DELAY_UI
-            )
-        }
-
-        onDispose {
-            sensorManager.unregisterListener(listener)
-        }
+    LaunchedEffect(counter) {
+        counter.totalSteps.collect { steps -> stepsToday = steps }
     }
+
+    // Sensor registration handled by StepCounterManager; no per-screen listeners
     // Light reminder: poll periodically so it triggers even if lux doesn't change
     LaunchedEffect(lightReminderEnabled) {
-        val dimThreshold = 1000f
-        val durationMs = 120_000L
+        val dimThreshold = 200f
+        val durationMs = 10_000L
         while (true) {
             if (!lightReminderEnabled) {
                 firstDimAtMs = 0L
@@ -271,24 +212,16 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
         }
     }
 
-    // Detect date change every minute and reset binding to today's flow
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(60_000)
-            val now = LocalDate.now()
-            if (now != today) {
-                today = now
-                stepsToday = 0
-            }
-        }
-    }
+    // Detect date change every minute and reset only local counters for new day
+    // No date-bound reset anymore
 
+    val clampedSteps = stepsToday.coerceAtMost(dailyGoal)
     val animatedProgress by animateFloatAsState(
-        targetValue = (stepsToday.toFloat() / dailyGoal.coerceAtLeast(1)).coerceIn(0f, 1f),
+        targetValue = (clampedSteps.toFloat() / dailyGoal.coerceAtLeast(1)).coerceIn(0f, 1f),
         animationSpec = spring(stiffness = 400f)
     )
     val animatedSteps by animateIntAsState(
-        targetValue = stepsToday,
+        targetValue = clampedSteps,
         animationSpec = spring(stiffness = 400f)
     )
 
@@ -301,7 +234,7 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "StepX",
+            text = "HAITAM SIMULATOR",
             style = MaterialTheme.typography.headlineLarge,
             textAlign = TextAlign.Center
         )
