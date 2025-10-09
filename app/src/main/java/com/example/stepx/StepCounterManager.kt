@@ -38,6 +38,19 @@ class StepCounterManager private constructor(private val appContext: Context) : 
     private var gravityZ: Float = 0f
     private var lastStepAtMs: Long = 0L
     private var pocketDetectionEnabled: Boolean = true
+
+    private val _speedMps = MutableStateFlow(0f)
+    val speedMps: StateFlow<Float> = _speedMps
+
+    private val _activityState = MutableStateFlow("Stopped")
+    val activityState: StateFlow<String> = _activityState
+
+    private val _caloriesBurned = MutableStateFlow(0f)
+    val caloriesBurned: StateFlow<Float> = _caloriesBurned
+
+    private val _distanceMeters = MutableStateFlow(0f)
+    val distanceMeters: StateFlow<Float> = _distanceMeters
+
     // No date-bound logic anymore
 
     init {
@@ -117,10 +130,43 @@ class StepCounterManager private constructor(private val appContext: Context) : 
                 if (!(pocketDetectionEnabled && _isCovered.value) && magnitude > threshold && (now - lastStepAtMs) > debounceMs) {
                     lastStepAtMs = now
                     incrementTotal(1)
+                    updateMetrics()
                 }
             }
         }
     }
+
+    private val lastSteps = ArrayDeque<Long>() // keep last few step timestamps for cadence
+
+    private fun updateMetrics() {
+        val now = System.currentTimeMillis()
+        lastSteps.addLast(now)
+        while (lastSteps.size > 5) lastSteps.removeFirst() // smooth cadence
+
+        val delta = (lastSteps.last() - lastSteps.first()) / 1000f
+        val cadence = if (delta > 0) (lastSteps.size - 1) / delta else 0f // steps per second
+
+        // Determine activity state and speed
+        val stepLengthWalking = 0.75f
+        val stepLengthRunning = 1.2f
+        val speed = if (cadence < 1.5f) cadence * stepLengthWalking else cadence * stepLengthRunning
+        _speedMps.value = speed
+
+        _activityState.value = when {
+            speed < 0.2f -> "Stopped"
+            speed < 2f -> "Walking"
+            else -> "Running"
+        }
+
+        // Distance
+        val stepLength = if (_activityState.value == "Running") stepLengthRunning else stepLengthWalking
+        _distanceMeters.value = _totalSteps.value * stepLength
+
+        // Calories burned
+        val caloriesPerStep = if (_activityState.value == "Running") 0.1f else 0.05f
+        _caloriesBurned.value = _totalSteps.value * caloriesPerStep
+    }
+
 
     private fun incrementTotal(delta: Int) {
         scope.launch { prefs.incrementTotalSteps(delta) }
