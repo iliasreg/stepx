@@ -1,11 +1,17 @@
 package com.example.stepx
 
+import android.content.Context
+import androidx.compose.material.icons.filled.WbSunny
 import android.content.Intent
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -22,7 +28,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -51,9 +62,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import android.widget.Toast
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,14 +86,16 @@ import androidx.navigation.compose.rememberNavController
 import com.example.stepx.ui.theme.StepXTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
+import kotlin.math.sqrt
 
 class MainActivity : ComponentActivity() {
-    @SuppressLint("SuspiciousIndentation")
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
         setContent {
             val prefs = remember { PreferencesManager(this) }
             val darkTheme by prefs.darkThemeEnabled.collectAsState(initial = false)
@@ -182,7 +197,7 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
     // Light reminder: poll periodically so it triggers even if lux doesn't change
     LaunchedEffect(lightReminderEnabled) {
         val dimThreshold = 200f
-        val durationMs = 100_000L
+        val durationMs = 10_000L
         while (true) {
             if (!lightReminderEnabled) {
                 firstDimAtMs = 0L
@@ -225,7 +240,7 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "StepX",
+            text = "Step X",
             style = MaterialTheme.typography.headlineLarge,
             textAlign = TextAlign.Center
         )
@@ -268,17 +283,30 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            val lightLabel = when {
+                ambientLux < 200f -> "Dim"
+                ambientLux < 1000f -> "Normal"
+                else -> "Bright"
+            }
+
+            val lightIcon = when (lightLabel) {
+                "Dim" -> Icons.Default.DarkMode
+                "Normal" -> Icons.Default.LightMode
+                else -> Icons.Default.WbSunny // use a brighter icon if you want
+            }
+
             FilterChip(
-                selected = ambientLux >= 1000f,
+                selected = lightLabel == "Bright",
                 onClick = {},
-                label = { Text(if (ambientLux >= 1000f) "Bright" else "Dim") },
+                label = { Text(lightLabel) },
                 leadingIcon = {
                     Icon(
-                        imageVector = if (ambientLux >= 1000f) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        imageVector = lightIcon,
                         contentDescription = null
                     )
                 }
             )
+
             FilterChip(
                 selected = !isCovered,
                 onClick = {},
@@ -417,13 +445,9 @@ private fun SettingsScreen() {
                     scope.launch { prefs.setBackgroundTrackingEnabled(checked) }
                     val svc = Intent(context, StepTrackingService::class.java)
                     if (checked) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(svc)
-                        } else {
-                            context.startService(svc)
-                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(svc) else context.startService(svc)
                     } else {
-                        context.applicationContext.stopService(svc)
+                        context.stopService(svc)
                     }
                 })
             }
@@ -467,6 +491,95 @@ private fun GoalDialog(
     )
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+private fun HistoryScreen() {
+    val context = LocalContext.current
+    val prefs = remember { PreferencesManager(context) }
+    val last7 by prefs.lastNDaysSteps(7).collectAsState(initial = List(7) { 0 })
+    val days = remember(last7) {
+        val today = LocalDate.now()
+        (6 downTo 0).map { offset ->
+            val d = today.minusDays(offset.toLong())
+            d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault()).take(1)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Top
+    ) {
+        Text(text = "History", style = MaterialTheme.typography.headlineLarge)
+        Spacer(Modifier.height(24.dp))
+        if (last7.any { it > 0 }) {
+            SimpleBarChart(days = days, values = last7)
+        } else {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DirectionsWalk,
+                    contentDescription = null
+                )
+                Spacer(Modifier.height(8.dp))
+    Text(
+                    text = "No steps yet — start moving to build your history",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SimpleBarChart(days: List<String>, values: List<Int>) {
+    val barColor = MaterialTheme.colorScheme.primary
+    val labelColor = MaterialTheme.colorScheme.onSurface
+    val maxValue = (values.maxOrNull() ?: 1).coerceAtLeast(1)
+    val barCount = values.size
+    val barSpacing = 16.dp
+    val barWidth = 24.dp
+    val chartHeight = 200.dp
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .height(chartHeight)
+        ) {
+            val totalSpacingPx = (barSpacing.toPx() * (barCount + 1))
+            val availableWidth = size.width - totalSpacingPx
+            val barWidthPx = barWidth.toPx().coerceAtMost(availableWidth / barCount)
+            var x = barSpacing.toPx()
+            values.forEach { v ->
+                val ratio = v.toFloat() / maxValue.toFloat()
+                val barHeight = ratio * size.height
+                drawRect(
+                    color = barColor,
+                    topLeft = Offset(x, size.height - barHeight),
+                    size = Size(barWidthPx, barHeight)
+                )
+                x += barWidthPx + barSpacing.toPx()
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // Simple labels row
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            days.forEach { day ->
+                Text(text = day, color = labelColor)
+            }
+        }
+    }
+}
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Preview(showBackground = true)
