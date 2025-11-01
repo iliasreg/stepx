@@ -101,17 +101,17 @@ class MainActivity : ComponentActivity() {
             val darkTheme by prefs.darkThemeEnabled.collectAsState(initial = false)
             StepXTheme(darkTheme = darkTheme) {
                 val navController = rememberNavController()
-            val snackbarHostState = remember { SnackbarHostState() }
-            val needsNotifPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-            val needsARPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                val snackbarHostState = remember { SnackbarHostState() }
+                val needsNotifPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                val needsARPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
                 val notifPermissionLauncher = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.RequestPermission(),
                     onResult = { }
                 )
-            val arPermissionLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.RequestPermission(),
-                onResult = { }
-            )
+                val arPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission(),
+                    onResult = { }
+                )
                 if (needsNotifPermission) {
                     LaunchedEffect(Unit) {
                         val granted = androidx.core.content.ContextCompat.checkSelfPermission(
@@ -123,17 +123,17 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-            if (needsARPermission) {
-                LaunchedEffect(Unit) {
-                    val granted = androidx.core.content.ContextCompat.checkSelfPermission(
-                        this@MainActivity,
-                        Manifest.permission.ACTIVITY_RECOGNITION
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (!granted) {
-                        arPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                if (needsARPermission) {
+                    LaunchedEffect(Unit) {
+                        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.ACTIVITY_RECOGNITION
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (!granted) {
+                            arPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                        }
                     }
                 }
-            }
                 Scaffold(modifier = Modifier.fillMaxSize(), snackbarHost = { SnackbarHost(snackbarHostState) }, bottomBar = {
                     val route = navController.currentBackStackEntryAsState().value?.destination?.route
                     NavigationBar {
@@ -143,7 +143,7 @@ class MainActivity : ComponentActivity() {
                             icon = { Icon(Icons.Default.Home, contentDescription = "Dashboard") },
                             label = { Text("Dashboard") }
                         )
-                        
+
                         NavigationBarItem(
                             selected = route == "settings",
                             onClick = { navController.navigate("settings") },
@@ -160,7 +160,7 @@ class MainActivity : ComponentActivity() {
                         composable("dashboard") {
                             DashboardScreen(snackbarHostState = snackbarHostState)
                         }
-                        
+
                         composable("settings") { SettingsScreen() }
                     }
                 }
@@ -528,7 +528,7 @@ private fun HistoryScreen() {
                     contentDescription = null
                 )
                 Spacer(Modifier.height(8.dp))
-    Text(
+                Text(
                     text = "No steps yet — start moving to build your history",
                     style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center
