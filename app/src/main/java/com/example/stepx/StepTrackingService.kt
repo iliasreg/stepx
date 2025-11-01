@@ -26,6 +26,7 @@ class StepTrackingService : Service(), SensorEventListener {
 	private lateinit var sensorManager: SensorManager
 	private var proximitySensor: Sensor? = null
     private var accelSensor: Sensor? = null
+	private var stepCounterSensor: Sensor? = null
 	private var isCovered: Boolean = false
 
     private var gravityX: Float = 0f
@@ -41,7 +42,8 @@ class StepTrackingService : Service(), SensorEventListener {
 		prefs = PreferencesManager(this)
 		sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-        accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+		stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+		accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 		createNotificationChannel()
 		startInForeground()
 		registerSensors()
@@ -60,6 +62,9 @@ class StepTrackingService : Service(), SensorEventListener {
 
 	private fun registerSensors() {
 		proximitySensor?.let {
+			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
+		}
+		stepCounterSensor?.let {
 			sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
 		}
         accelSensor?.let {

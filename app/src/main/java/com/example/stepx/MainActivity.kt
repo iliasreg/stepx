@@ -1,6 +1,7 @@
 package com.example.stepx
 
 import android.content.Context
+import androidx.compose.material.icons.filled.WbSunny
 import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -239,7 +240,7 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "HAITAM SIMULATOR",
+            text = "Step X",
             style = MaterialTheme.typography.headlineLarge,
             textAlign = TextAlign.Center
         )
@@ -282,17 +283,30 @@ private fun DashboardScreen(snackbarHostState: SnackbarHostState) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            val lightLabel = when {
+                ambientLux < 200f -> "Dim"
+                ambientLux < 1000f -> "Normal"
+                else -> "Bright"
+            }
+
+            val lightIcon = when (lightLabel) {
+                "Dim" -> Icons.Default.DarkMode
+                "Normal" -> Icons.Default.LightMode
+                else -> Icons.Default.WbSunny // use a brighter icon if you want
+            }
+
             FilterChip(
-                selected = ambientLux >= 1000f,
+                selected = lightLabel == "Bright",
                 onClick = {},
-                label = { Text(if (ambientLux >= 1000f) "Bright" else "Dim") },
+                label = { Text(lightLabel) },
                 leadingIcon = {
                     Icon(
-                        imageVector = if (ambientLux >= 1000f) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        imageVector = lightIcon,
                         contentDescription = null
                     )
                 }
             )
+
             FilterChip(
                 selected = !isCovered,
                 onClick = {},

@@ -104,11 +104,17 @@ class StepCounterManager private constructor(private val appContext: Context) : 
                 } else {
                     val delta = (raw - lastRawCounter).coerceAtLeast(0)
                     lastRawCounter = raw
-                    if (!(pocketDetectionEnabled && _isCovered.value) && delta > 0) incrementTotal(delta)
+                    if (!(pocketDetectionEnabled && _isCovered.value) && delta > 0) {
+                        incrementTotal(delta)
+                        updateMetrics() // <-- AJOUTER ICI (1)
+                    }
                 }
             }
             Sensor.TYPE_STEP_DETECTOR -> {
-                if (!(pocketDetectionEnabled && _isCovered.value)) incrementTotal(1)
+                if (!(pocketDetectionEnabled && _isCovered.value)) {
+                    incrementTotal(1)
+                    updateMetrics() // <-- AJOUTER ICI (2)
+                }
             }
             Sensor.TYPE_ACCELEROMETER -> {
                 // Low-pass gravity estimation
